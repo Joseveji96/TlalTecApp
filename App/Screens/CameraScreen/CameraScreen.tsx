@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View, Image, Dimensions, Alert } from 'react-native'
 import { useEffect, useRef, useState } from 'react'
-import {Camera, CameraView, CameraType, CameraMode, FlashMode} from "expo-camera";
+import {Camera, CameraView, CameraType, FlashMode} from "expo-camera";
 import * as MediaLibrary from "expo-media-library";
 import React from 'react';
 import IcoBottonTL from '../../../src/components/IcoBottonTL';
@@ -8,10 +8,10 @@ import * as ExpoImagePicker  from "expo-image-picker";
 import Botton from '../../../src/components/Botton';
 import COLORS from '../../Constants/Color';
 import LottieView from 'lottie-react-native';
-import { Poppins_700Bold } from '@expo-google-fonts/poppins';
 import { cameraIP } from '../../../src/servises/constantes';
-
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from "@react-native-community/netinfo";
+import * as FileSystem from 'expo-file-system'; 
 
 
 const CameraScreen = ({navigation}) => {
@@ -22,19 +22,88 @@ const CameraScreen = ({navigation}) => {
   const cameraRef = useRef(null);
   const [resultados, setResultados] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
-
   const [loading, setLoading] = useState(false);
+  const [offlineQueue, setOfflineQueue] = useState([]);
 
   const width = Dimensions.get("window").width;
   const height = Dimensions.get("window").height;
+
+  // New function to store large images
+  const storeImageOffline = async (base64Image) => {
+    try {
+      // Generate a unique filename
+      const filename = `offline_image_${Date.now()}.jpg`;
+      const fileUri = `${FileSystem.documentDirectory}${filename}`;
+
+      // Write the base64 image to a file
+      await FileSystem.writeAsStringAsync(fileUri, base64Image, {
+        encoding: FileSystem.EncodingType.Base64
+      });
+
+      // Store the file URI in AsyncStorage
+      const storedImagesJson = await AsyncStorage.getItem('offlineImageUris');
+      const storedImages = storedImagesJson ? JSON.parse(storedImagesJson) : [];
+      
+      await AsyncStorage.setItem('offlineImageUris', JSON.stringify([
+        ...storedImages, 
+        fileUri
+      ]));
+
+      return true;
+    } catch (error) {
+      console.error('Error storing image offline:', error);
+      return false;
+    }
+  };
+
+  // Modified uploadImage function
+  const uploadImage = async (base64, navigation) => {
+    try {
+      // Check internet connection before uploading
+      const netState = await NetInfo.fetch();
+      
+      if (!netState.isConnected) {
+        // Store image for later processing
+        const success = await storeImageOffline(base64);
+        if (success) {
+          Alert.alert(
+            'Sin conexión',
+            'La imagen se almacenó para procesar cuando haya internet.',
+            [{ text: 'OK' }]
+          );
+        }
+        return;
+      }
+      setLoading(true);
+      let response = await fetch(cameraIP, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ image: base64 }),
+      });
+      
+      const data = await response.json();
+      setLoading(false);
+      
+      if (data.plagas_detectadas && data.plagas_detectadas.length > 0 && data.plagas_detectadas[0].length > 0) {
+        setResultados(data);
+        navigation.navigate("DetectionResults", { resultados: data });
+      } else {
+        Alert.alert(
+          'No se identificó un aguacate',
+          'Por favor, intente tomar otra foto.',
+          [{ text: 'OK' }]
+        );
+      }
+
+    } catch (error) {
+      console.log('Hubo un error al subir la imagen', error);
+      setLoading(false);
+    }
+  };
   
-  useEffect(() => {
-    (async () => {
-      MediaLibrary.requestPermissionsAsync();
-      const cameraStatus = await Camera.requestCameraPermissionsAsync();
-      setHasCameraPermission(cameraStatus.status === 'granted');
-    })();
-  },[]);
+  
   
   if (hasCameraPermission === false){
     return <Text>Sin acceso a la camara</Text>
@@ -48,6 +117,71 @@ const CameraScreen = ({navigation}) => {
     setType(current => (current === "back" ? "front" : "back"));
   }
 
+  // Modified checkAndProcessOfflineImages function
+  const checkAndProcessOfflineImages = async () => {
+    try {
+      // Check internet connection
+      const netState = await NetInfo.fetch();
+      if (netState.isConnected) {
+        // Retrieve stored image URIs
+        const storedImagesJson = await AsyncStorage.getItem('offlineImageUris');
+        if (storedImagesJson) {
+          const storedImageUris = JSON.parse(storedImagesJson);
+          
+          if (storedImageUris.length > 0) {
+            // Process images one by one
+            const currentImageUri = storedImageUris[0];
+            try {
+              // Read the image file
+              const base64Image = await FileSystem.readAsStringAsync(currentImageUri, {
+                encoding: FileSystem.EncodingType.Base64
+              });
+
+              // Upload the image
+              await uploadImage(base64Image, navigation);
+              
+              // Remove processed image from queue
+              const updatedQueue = storedImageUris.slice(1);
+              if (updatedQueue.length > 0) {
+                await AsyncStorage.setItem('offlineImageUris', JSON.stringify(updatedQueue));
+              } else {
+                await AsyncStorage.removeItem('offlineImageUris');
+              }
+
+              // Delete the image file after processing
+              await FileSystem.deleteAsync(currentImageUri);
+            } catch (uploadError) {
+              console.log('Error processing offline image', uploadError);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Error checking offline images', error);
+    }
+  };
+
+  useEffect(() => {
+    checkAndProcessOfflineImages();
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        checkAndProcessOfflineImages();
+      }
+    });
+
+    (async () => {
+      MediaLibrary.requestPermissionsAsync();
+      const cameraStatus = await Camera.requestCameraPermissionsAsync();
+      setHasCameraPermission(cameraStatus.status === 'granted');
+    })();
+
+    // Cleanup subscription
+    return () => {
+      unsubscribe();
+    };
+  },[]);
+
+
   const tomarFoto = async () => {
     if(cameraRef){
       try {
@@ -58,7 +192,6 @@ const CameraScreen = ({navigation}) => {
         });
         setImage(datosImg.uri);
         setCapturedImage(datosImg.base64);
-        //uploadImage(datosImg.base64);
       } catch (error) {
         console.log('Error al cargar la imagen' + error);
       }
@@ -90,43 +223,7 @@ const CameraScreen = ({navigation}) => {
       console.error('Error al seleccionar la imagen:', error);
     }
   };
-
-  const uploadImage = async(base64, navigation) => {
-    setLoading(true); // Mostrar la animación de carga
-    try {
-      let response = await fetch(cameraIP, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ image: base64 }),
-      });
-      const data = await response.json();
-      setLoading(false); // Ocultar la animación de carga
-      
-      
-      //Verificar si se detectaron plagas
-      if (data.plagas_detectadas && data.plagas_detectadas.length > 0 && data.plagas_detectadas[0].length > 0) {
-        setResultados(data); // Guardar los resultados si se detectaron plagas
-        navigation.navigate("DetectionResults", { resultados: data }); // Navegar a la siguiente pantalla
-      } else {
-        // Si no se detectan plagas, mostrar un mensaje
-        Alert.alert(
-          'No se identificó un aguacate',
-          'Por favor, intente tomar otra foto.',
-          [{ text: 'OK' }]
-        );
-      }
-
-    } catch (error) {
-      console.log('Hubo un error al subir la imagen', error);
-      setLoading(false); // Ocultar la animación de carga
-    }
-  };
   
-
-
-
   return (
     <View style={styles.container}>
       {image ? (

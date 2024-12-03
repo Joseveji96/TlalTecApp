@@ -136,7 +136,7 @@ const DetectionResults = ({route, navigation}) => {
             </ScrollView>
             <View style={{marginTop: 56, marginBottom: 10, paddingHorizontal: 20}}>
                 <Text style={{fontFamily: PoppinsSemiBold, fontSize: 15, textAlign: "justify", paddingBottom: 10, color: COLORS.gray3}}>Descubre como solucionarla</Text>
-                <Botton title="Visitar Sistema Experto" filled style={ { backgroundColor: COLORS.dark}} onPress={() => navigation.navigate('GravedadScreen',  {diagnosisData})}S     />
+                <Botton title="Visitar Sistema Experto" filled style={ { backgroundColor: COLORS.dark}} onPress={() => navigation.navigate('GravedadScreen',  {diagnosisData: {name: plaga}})} />
           </View>
         </ScrollView>
     );
