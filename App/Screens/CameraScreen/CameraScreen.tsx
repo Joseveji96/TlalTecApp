@@ -23,7 +23,8 @@ const CameraScreen = ({navigation}) => {
   const [resultados, setResultados] = useState(null);
   const [capturedImage, setCapturedImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [offlineQueue, setOfflineQueue] = useState([]);
+  const [offlineQueue, setOfflineQueue] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
 
   const width = Dimensions.get("window").width;
   const height = Dimensions.get("window").height;
@@ -117,43 +118,25 @@ const CameraScreen = ({navigation}) => {
     setType(current => (current === "back" ? "front" : "back"));
   }
 
-  // Modified checkAndProcessOfflineImages function
-  const checkAndProcessOfflineImages = async () => {
+  const checkOfflineImages = async () => {
     try {
-      // Check internet connection
-      const netState = await NetInfo.fetch();
-      if (netState.isConnected) {
-        // Retrieve stored image URIs
-        const storedImagesJson = await AsyncStorage.getItem('offlineImageUris');
-        if (storedImagesJson) {
-          const storedImageUris = JSON.parse(storedImagesJson);
-          
-          if (storedImageUris.length > 0) {
-            // Process images one by one
-            const currentImageUri = storedImageUris[0];
-            try {
-              // Read the image file
-              const base64Image = await FileSystem.readAsStringAsync(currentImageUri, {
-                encoding: FileSystem.EncodingType.Base64
-              });
-
-              // Upload the image
-              await uploadImage(base64Image, navigation);
-              
-              // Remove processed image from queue
-              const updatedQueue = storedImageUris.slice(1);
-              if (updatedQueue.length > 0) {
-                await AsyncStorage.setItem('offlineImageUris', JSON.stringify(updatedQueue));
-              } else {
-                await AsyncStorage.removeItem('offlineImageUris');
-              }
-
-              // Delete the image file after processing
-              await FileSystem.deleteAsync(currentImageUri);
-            } catch (uploadError) {
-              console.log('Error processing offline image', uploadError);
-            }
-          }
+      // Retrieve stored image URIs
+      const storedImagesJson = await AsyncStorage.getItem('offlineImageUris');
+      if (storedImagesJson) {
+        const storedImageUris = JSON.parse(storedImagesJson);
+        
+        if (storedImageUris.length > 0) {
+          setOfflineQueue(true);
+          Alert.alert(
+            'Imágenes pendientes',
+            `Tienes ${storedImageUris.length} imagen(es) sin procesar.`,
+            [{ 
+              text: 'Ir a Imágenes Offline', 
+              onPress: () => navigation.navigate('OfflineImages') 
+            }]
+          );
+        }else{
+          setOfflineQueue(false);
         }
       }
     } catch (error) {
@@ -162,19 +145,26 @@ const CameraScreen = ({navigation}) => {
   };
 
   useEffect(() => {
-    checkAndProcessOfflineImages();
-    const unsubscribe = NetInfo.addEventListener(state => {
-      if (state.isConnected) {
-        checkAndProcessOfflineImages();
-      }
+    // checkOfflineImages();
+    NetInfo.fetch().then(state => {
+      setIsConnected(state.isConnected);
     });
 
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        setIsConnected(true);
+        checkOfflineImages();
+      }else{
+        setIsConnected(false);
+      }
+    });
+  
     (async () => {
       MediaLibrary.requestPermissionsAsync();
       const cameraStatus = await Camera.requestCameraPermissionsAsync();
       setHasCameraPermission(cameraStatus.status === 'granted');
     })();
-
+  
     // Cleanup subscription
     return () => {
       unsubscribe();
@@ -290,10 +280,13 @@ const CameraScreen = ({navigation}) => {
         </View>
       ) : <></>}
 
-      {!image && (
+      {!image &&  (
         <View style={{ width: "100%", position: 'absolute', paddingBottom: 70, display: 'flex', flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: "10%" }}>
           <IcoBottonTL onPress={openImagePicker} iconSource={require("../../../src/assets/icons/selecImage.png")} />
           <IcoBottonTL onPress={tomarFoto} iconSource={require("../../../src/assets/icons/Camera.png")} iconSize={70} />
+          { isConnected && offlineQueue && (
+            <IcoBottonTL onPress={() => navigation.navigate("OfflineImages")} iconSource={require("../../../src/assets/icons/danger1.png")}/>
+          )}
           <IcoBottonTL onPress={() => toggleCamera()} iconSource={require("../../../src/assets/icons/reverse.png")} iconSize={40}/>
         </View>
       )}

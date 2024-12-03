@@ -18,6 +18,7 @@ import DetectionResults from './Screens/Diagnostics/DetectionResults';
 import { Huertos } from '../src/servises/huertos/models/huerto.models';
 import DetalleHuertoScreen from './Screens/DetalleHuertoScreen/DetalleHuertoScreen';
 import ToolsScreen from './Screens/HomeScreen/ToolsScreen';
+import OfflineImagesScreen from './Screens/CameraScreen/OfflineImagesScreen';
 
 const NavStack = createNativeStackNavigator();
 
@@ -64,6 +65,7 @@ export default function Navigation(){
                     <NavStack.Screen name='DetectionResults' component={DetectionResults} options={{ headerShown: false }} />
                     <NavStack.Screen name='DetalleHuertoScreen' component={DetalleHuertoScreen} options={{ headerShown: false }} />
                     <NavStack.Screen name='ToolsScreen' component={ToolsScreen} options={{ headerShown: false }} />
+                    <NavStack.Screen name='OfflineImages' component={OfflineImagesScreen} options={{ headerShown: false }} />
                 </NavStack.Navigator>
             </NavigationContainer>
 
